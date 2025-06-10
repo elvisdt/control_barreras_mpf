@@ -1,0 +1,17 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "idf.espIdfPath": "/home/malek/espressif/v5.4/esp-idf",
+    "idf.pythonInstallPath": "/usr/bin/python3",
+    "idf.openOcdConfigs": [
+        "board/esp32-wrover-kit-3.3v.cfg"
+    ],
+    "idf.port": "/dev/ttyUSB0",
+    "idf.toolsPath": "/home/malek/espressif/.espressif",
+    "idf.flashType": "UART",
+    "files.associations": {
+        "config_main.h": "c",
+        "string.h": "c",
+        "freertos.h": "c",
+        "button.h": "c"
+    }
+}
