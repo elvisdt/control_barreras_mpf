@@ -1,2 +1,2 @@
-idf_component_register(SRCS "main_02.c" "main_02A.c" "main_02B.c"
+idf_component_register(SRCS "main_02.c"
                     INCLUDE_DIRS ".")
