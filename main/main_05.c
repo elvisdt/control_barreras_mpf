@@ -21,13 +21,14 @@
 #define BARRERA_ABRIR GPIO_NUM_23
 #define BARRERA_CERRAR GPIO_NUM_22
 #define DURACION_PULSO_MS 600
-#define ALARMA GPIO_NUM_2 //25
+#define ALARMA GPIO_NUM_2
 
 // Variables compartidas
 volatile bool solicitar_apertura = false;
 volatile bool solicitar_cierre = false;
 volatile bool barrera_en_movimiento = false;
 volatile bool barrera_abierta = true;
+volatile bool alarma_activada = false;
 
 volatile bool sa1 = false, sa2 = false, sb1 = false, sb2 = false;
 
@@ -35,6 +36,7 @@ static button_t btn_sa1, btn_sa2, btn_sb1, btn_sb2;
 
 // Estados del sistema
 typedef enum {
+    ESTADO_VALIDACION_FORZADA,
     ESTADO_PASO_PEATONAL,
     ESTADO_PROCESANDO_A_B,
     ESTADO_PROCESANDO_B_A,
@@ -47,6 +49,7 @@ static TimerHandle_t timer_optimizacion;
 static TimerHandle_t timer_seguridad;
 
 void controlar_alarma(bool activar) {
+    alarma_activada = activar;
     gpio_set_level(ALARMA, activar ? 1 : 0);
     ESP_LOGI(TAG, "Alarma %s", activar ? "ACTIVADA" : "DESACTIVADA");
 }
@@ -92,7 +95,10 @@ void on_timer_optimizacion(TimerHandle_t xTimer) {
 void on_timer_seguridad(TimerHandle_t xTimer) {
     ESP_LOGW(TAG, "TIEMPO MÁXIMO DE CRUCE ALCANZADO - FORZANDO RESET");
     controlar_alarma(false);
-    solicitar_apertura = true;
+
+    if (estado_actual != ESTADO_PASO_PEATONAL){
+        solicitar_apertura = true;
+    }
     estado_actual = ESTADO_PASO_PEATONAL;
 }
 
@@ -105,6 +111,19 @@ void on_sensor_callback(button_t *btn, button_state_t state) {
     if (btn->gpio == SB2) sb2 = true;
 
     ESP_LOGW("SEN", "BTN[%02d] -> %02d",btn->gpio, state);
+
+    if (timer_seguridad != NULL) {
+        if (xTimerIsTimerActive(timer_seguridad)) {
+            ESP_LOGI(TAG, "Security timer is running.");
+            xTimerReset(timer_seguridad, 0);
+        } else {
+            ESP_LOGI(TAG, "Security timer is NOT running.");
+            xTimerStart(timer_seguridad, 0);
+        }
+    } else {
+        ESP_LOGW(TAG, "Security timer not initialized (NULL).");
+    }
+
 }
 
 void task_procesar_sensores(void *param) {
@@ -113,48 +132,72 @@ void task_procesar_sensores(void *param) {
 
     while (1) {
         switch (estado_actual) {
+            case ESTADO_VALIDACION_FORZADA:
+                if (sb2) {
+                    ESP_LOGI(TAG, "Validación forzada resuelta: sentido A->B");
+                    estado_actual = ESTADO_PROCESANDO_A_B;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_A_B");
+                    paso_a_b_detectado = true;
+                    sb2 = false;
+                } else if (sa1) {
+                    ESP_LOGI(TAG, "Validación forzada resuelta: sentido B->A");
+                    estado_actual = ESTADO_PROCESANDO_B_A;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_B_A");
+                    paso_b_a_detectado = true;
+                    sa1 = false;
+                }
+                break;
+
             case ESTADO_PASO_PEATONAL:
                 if (sa1) {
                     ESP_LOGI(TAG, "Detectado A->B");
-                    controlar_alarma(true); // Solo alarma, sin cierre inmediato // Encender alarma para A->B
+                    controlar_alarma(true);
                     estado_actual = ESTADO_PROCESANDO_A_B;
-                    xTimerStart(timer_seguridad, 0);
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_A_B");
+                    // xTimerStart(timer_seguridad, 0);
                     paso_a_b_detectado = false;
                     sa1 = false;
                 } else if (sb2) {
                     ESP_LOGI(TAG, "Detectado B->A");
-                    solicitar_cierre = true; // Cierre inmediato para B->A
+                    solicitar_cierre = true;
                     controlar_alarma(true);
                     estado_actual = ESTADO_PROCESANDO_B_A;
-                    xTimerStart(timer_seguridad, 0);
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_B_A");
+                    // xTimerStart(timer_seguridad, 0);
                     paso_b_a_detectado = false;
                     sb2 = false;
+                } else if (sa2 || sb1) {
+                    ESP_LOGW(TAG, "Sensor intermedio activado tras timeout. Validación forzada");
+                    solicitar_cierre = true;
+                    controlar_alarma(true);
+                    // xTimerStart(timer_seguridad, 0);
+                    estado_actual = ESTADO_VALIDACION_FORZADA;
+                    sa2 = sb1 = false;
                 }
                 break;
 
             case ESTADO_PROCESANDO_A_B:
                 if (sa2) {
                     solicitar_cierre = true;
-                    xTimerReset(timer_seguridad, 0);
+                    // xTimerReset(timer_seguridad, 0);
                     ESP_LOGI(TAG, "Timer de seguridad reiniciado");
-                    xTimerReset(timer_seguridad, 0);
                     ESP_LOGI(TAG, "A->B: confirmado en SA2 - cerrando barrera");
                     sa2 = false;
                 }
                 if (sb1) {
                     paso_a_b_detectado = true;
-                    xTimerReset(timer_seguridad, 0);
+                    // xTimerReset(timer_seguridad, 0);
                     ESP_LOGI(TAG, "A->B: paso intermedio SB1");
                     sb1 = false;
                 }
                 if (sb2 && paso_a_b_detectado) {
-                    controlar_alarma(false); // Apagar alarma al finalizar el cruce
+                    controlar_alarma(false);
                     ESP_LOGI(TAG, "A->B: salida completa SB2");
-                    xTimerStop(timer_seguridad, 0);
+                    // xTimerStop(timer_seguridad, 0);
                     ESP_LOGI(TAG, "Timer de seguridad detenido");
                     xTimerStart(timer_optimizacion, 0);
-                    controlar_alarma(false);
                     estado_actual = ESTADO_OPTIMIZACION_A_B;
+                    ESP_LOGI(TAG, "Cambio de estado: OPTIMIZACION_A_B");
                     sb2 = false;
                 }
                 break;
@@ -164,15 +207,16 @@ void task_procesar_sensores(void *param) {
                     solicitar_cierre = true;
                     paso_b_a_detectado = true;
                     ESP_LOGI(TAG, "B->A: paso intermedio SA2");
+                    // xTimerReset(timer_seguridad, 0);
                     sa2 = false;
                 }
                 if (sa1 && paso_b_a_detectado) {
-                    xTimerStop(timer_seguridad, 0);
-                    controlar_alarma(false); // Apagar alarma al finalizar el cruce
+                    // xTimerStop(timer_seguridad, 0);
+                    controlar_alarma(false);
                     ESP_LOGI(TAG, "B->A: salida completa SA1");
                     xTimerStart(timer_optimizacion, 0);
-                    controlar_alarma(false);
                     estado_actual = ESTADO_OPTIMIZACION_B_A;
+                    ESP_LOGI(TAG, "Cambio de estado: OPTIMIZACION_B_A");
                     sa1 = false;
                 }
                 break;
@@ -182,12 +226,14 @@ void task_procesar_sensores(void *param) {
                     ESP_LOGI(TAG, "Nuevo vehiculo A->B durante optimizacion");
                     xTimerStop(timer_optimizacion, 0);
                     estado_actual = ESTADO_PROCESANDO_A_B;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_A_B");
                     paso_a_b_detectado = false;
                     sa1 = sa2 = false;
                 } else if (sb2) {
                     ESP_LOGI(TAG, "Vehiculo B->A llego - cambio de sentido");
                     xTimerStop(timer_optimizacion, 0);
                     estado_actual = ESTADO_PROCESANDO_B_A;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_B_A");
                     solicitar_cierre = true;
                     paso_b_a_detectado = false;
                     sb2 = false;
@@ -199,30 +245,24 @@ void task_procesar_sensores(void *param) {
                     ESP_LOGI(TAG, "Nuevo vehiculo B->A durante optimizacion");
                     xTimerStop(timer_optimizacion, 0);
                     estado_actual = ESTADO_PROCESANDO_B_A;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_B_A");
                     paso_b_a_detectado = false;
                     sb1 = sb2 = false;
                 } else if (sa1) {
                     ESP_LOGI(TAG, "Vehiculo A->B llego - cambio de sentido");
                     xTimerStop(timer_optimizacion, 0);
                     estado_actual = ESTADO_PROCESANDO_A_B;
+                    ESP_LOGI(TAG, "Cambio de estado: PROCESANDO_A_B");
                     solicitar_cierre = true;
                     paso_a_b_detectado = false;
                     sa1 = false;
                 }
                 break;
         }
-
-        // Validación extra: si después del timeout se presiona SA2 o SB1, cerrar y reiniciar seguridad
-        if (estado_actual == ESTADO_PASO_PEATONAL && (sa2 || sb1)) {
-            ESP_LOGW(TAG, "Sensor intermedio activado tras timeout. Cierre forzado por seguridad");
-            solicitar_cierre = true;
-            controlar_alarma(true);
-            xTimerStart(timer_seguridad, 0);
-            sa2 = sb1 = false;
-        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
+
 
 void init_gpio_con_button() {
     btn_sa1.gpio = SA1;
@@ -256,12 +296,11 @@ void init_gpio_con_button() {
 
     gpio_config_t out_conf = {
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << BARRERA_ABRIR) | (1ULL << BARRERA_CERRAR),
+        .pin_bit_mask = (1ULL << BARRERA_ABRIR) | (1ULL << BARRERA_CERRAR) |  (1ULL << ALARMA),
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
-    out_conf.pin_bit_mask |= (1ULL << ALARMA);
     gpio_config(&out_conf);
 
     gpio_set_level(BARRERA_ABRIR, 0);
@@ -283,6 +322,11 @@ void task_logger_estado(void *param) {
             case ESTADO_PROCESANDO_B_A:
                 ESP_LOGI("LOGGER", "Estado: PROCESANDO_B_A");
                 break;
+
+            case ESTADO_VALIDACION_FORZADA:
+                ESP_LOGI("LOGGER", "Estado: VALIDACION_FORZADA");
+                break;
+
             case ESTADO_OPTIMIZACION_A_B:
                 ESP_LOGI("LOGGER", "Estado: OPTIMIZACION_A_B");
                 break;
@@ -294,7 +338,7 @@ void task_logger_estado(void *param) {
         ESP_LOGI("LOGGER", "Barreras: %s | Movimiento: %s | Alarma: %s", 
                  barrera_abierta ? "ABIERTA" : "CERRADA", 
                  barrera_en_movimiento ? "EN MOVIMIENTO" : "DETENIDA",
-                 gpio_get_level(ALARMA) ? "ACTIVA" : "APAGADA");
+                 alarma_activada ? "ACTIVA" : "APAGADA");
         vTaskDelay(pdMS_TO_TICKS(3000)); // Log cada 3 segundos
     }
 }
@@ -314,7 +358,7 @@ void app_main() {
     timer_optimizacion = xTimerCreate("opt", pdMS_TO_TICKS(5000), pdFALSE, NULL, on_timer_optimizacion);
     timer_seguridad = xTimerCreate("seguridad", pdMS_TO_TICKS(20000), pdFALSE, NULL, on_timer_seguridad);
 
-    xTaskCreate(task_control_barreras, "control_barreras", 2048*2, NULL, 10, NULL);
-    xTaskCreate(task_procesar_sensores, "procesar_sensores", 4096*2, NULL, 9, NULL);
+    xTaskCreate(task_control_barreras, "control_barreras", 2048, NULL, 10, NULL);
+    xTaskCreate(task_procesar_sensores, "procesar_sensores", 4096, NULL, 9, NULL);
     xTaskCreate(task_logger_estado, "logger_estado", 2048, NULL, 5, NULL);
 }

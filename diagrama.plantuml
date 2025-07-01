@@ -1,0 +1,33 @@
+@startuml diagram 01
+skinparam style strictuml
+
+[*] --> PASO_PEATONAL : Inicio o después de abrir
+
+state PASO_PEATONAL {
+    PASO_PEATONAL --> PROCESANDO_A_B : Sensor SA1 activado
+    PASO_PEATONAL --> PROCESANDO_B_A : Sensor SB2 activado
+}
+
+state PROCESANDO_A_B {
+    PROCESANDO_A_B --> PROCESANDO_A_B : SB1 activado (validación cruce)
+    PROCESANDO_A_B --> OPTIMIZACION_A_B : SB2 activado y SB1 ya activo
+}
+
+state PROCESANDO_B_A {
+    PROCESANDO_B_A --> PROCESANDO_B_A : SA2 activado (validación cruce)
+    PROCESANDO_B_A --> OPTIMIZACION_B_A : SA1 activado y SA2 ya activo
+}
+
+state OPTIMIZACION_A_B {
+    OPTIMIZACION_A_B --> PROCESANDO_A_B : SA1 o SA2 activado (más vehículos A->B)
+    OPTIMIZACION_A_B --> PROCESANDO_B_A : SB2 activado (cambio de sentido)
+    OPTIMIZACION_A_B --> PASO_PEATONAL : 5s sin actividad
+}
+
+state OPTIMIZACION_B_A {
+    OPTIMIZACION_B_A --> PROCESANDO_B_A : SB1 o SB2 activado (más vehículos B->A)
+    OPTIMIZACION_B_A --> PROCESANDO_A_B : SA1 activado (cambio de sentido)
+    OPTIMIZACION_B_A --> PASO_PEATONAL : 5s sin actividad
+}
+
+@enduml

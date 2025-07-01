@@ -35,7 +35,7 @@ static const char *states[] = {
 
 static void on_button_cb(button_t *btn, button_state_t state) {
     const char *TAG_BTN = "BTN";
-    //if (state != BUTTON_RELEASED) return;
+    if (state != BUTTON_PRESSED_LONG) return;
 
     ESP_LOGW(TAG_BTN, "[%02d] -> %s", btn->gpio, states[state]);
 }

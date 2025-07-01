@@ -19,17 +19,17 @@ static const char *TAG = "CONTROL";
 // ================================
 // CONFIGURACIÓN DE PINES
 // ================================
-#define PIN_SENSOR_SA1              GPIO_NUM_4    // Sensor A1 (más alejado)
-#define PIN_SENSOR_SA2              GPIO_NUM_18   // Sensor A2 (más cerca)
-#define PIN_SENSOR_SB1              GPIO_NUM_19   // Sensor B1 (más cerca)
-#define PIN_SENSOR_SB2              GPIO_NUM_21   // Sensor B2 (más alejado)
+#define PIN_SENSOR_SA1         GPIO_NUM_4    // Sensor A1 (más alejado)
+#define PIN_SENSOR_SA2         GPIO_NUM_18   // Sensor A2 (más cerca)
+#define PIN_SENSOR_SB1         GPIO_NUM_19   // Sensor B1 (más cerca)
+#define PIN_SENSOR_SB2         GPIO_NUM_21   // Sensor B2 (más alejado)
 
-#define PIN_BARRERA_ABRIR           GPIO_NUM_23   // Pulso para abrir barrera
-#define PIN_BARRERA_CERRAR          GPIO_NUM_22   // Pulso para cerrar barrera
-#define PIN_ADVERTENCIA_PEATONAL    GPIO_NUM_25  // Luces + sirena advertencia peatonal
+#define PIN_BARRERA_ABRIR      GPIO_NUM_23   // Pulso para abrir barrera
+#define PIN_BARRERA_CERRAR     GPIO_NUM_22   // Pulso para cerrar barrera
+#define PIN_ADVERTENCIA_PEATONAL GPIO_NUM_25  // Luces + sirena advertencia peatonal
 
-#define PIN_OUT_AUX01               GPIO_NUM_26     // OUT GND 01
-#define PIN_OUT_AUX02               GPIO_NUM_2     // OUT GND 01
+#define PIN_OUT_AUX01          GPIO_NUM_26     // OUT GND 01
+#define PIN_OUT_AUX02          GPIO_NUM_2     // OUT GND 01
 
 // Configuración de pulsos
 #define DURACION_PULSO_MS      600          // Duración del pulso en ms
@@ -83,7 +83,7 @@ static esp_timer_handle_t timer_inactividad_global = NULL;
 static button_t btn_sa1, btn_sa2, btn_sb1, btn_sb2;
 
 // Configuración de tiempos (en microsegundos)
-#define TIEMPO_ENTRADA_TIMEOUT      (15 * 1000000)   // 5 seg: SA1→SA2 o SB2→SB1
+#define TIEMPO_ENTRADA_TIMEOUT      (10 * 1000000)   // 5 seg: SA1→SA2 o SB2→SB1
 #define TIEMPO_CIERRE_MAXIMO        (20 * 1000000)  // 30 seg: Máximo barreras cerradas
 #define TIEMPO_OPTIMIZACION         (5 * 1000000)   // 5 seg: Espera post-salida
 #define TIEMPO_MAX_INACTIVIDAD      (30 * 1000000)   // 10 seg: incactivedad
@@ -185,11 +185,7 @@ void reiniciar_timer_inactividad() {
 static void on_sensor_callback(button_t *btn, button_state_t state) {
     
 
-    // if (state != BUTTON_PRESSED && state != BUTTON_RELEASED) {
-    //     return;
-    // }
-
-    if (state != BUTTON_PRESSED) {
+    if (state != BUTTON_PRESSED && state != BUTTON_RELEASED) {
         return;
     }
     
@@ -341,7 +337,7 @@ void procesar_paso_peatonal(gpio_num_t pin, bool estado) {
     } else if (pin == PIN_SENSOR_SB2) {
         ESP_LOGI(TAG, "DETECCION B->A: Vehiculo desde B");
         iniciar_procesamiento_sentido(GLOBAL_PROCESANDO_B_A);
-        cerrar_barreras();
+        
     } else {
         ESP_LOGW(TAG, "PATRON EXTRANO: Sensor %d activo en paso peatonal", pin);
     }
@@ -465,8 +461,7 @@ void procesar_optimizacion_b_a(gpio_num_t pin, bool estado) {
         g_sistema.estado_global = GLOBAL_PROCESANDO_B_A;
         g_sistema.fase_actual = FASE_ESPERANDO_CONFIRMACION;
         controlar_advertencia_peatonal(true);
-        //cerrar_barreras();
-
+        
         if (pin == PIN_SENSOR_SB2) {
             // Nuevo ciclo completo
             g_sistema.timestamp_entrada = esp_timer_get_time();
