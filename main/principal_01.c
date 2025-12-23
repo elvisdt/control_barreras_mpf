@@ -18,11 +18,13 @@
 #define SB1 GPIO_NUM_19
 #define SB2 GPIO_NUM_21
 
-#define BARRERA_ABRIR GPIO_NUM_23
-#define BARRERA_CERRAR GPIO_NUM_22
-#define DURACION_PULSO_MS 700
-#define ALARMA          GPIO_NUM_25
-#define PIN_OUT_AUX01   GPIO_NUM_2
+#define BARRERA_ABRIR       GPIO_NUM_23
+#define BARRERA_CERRAR      GPIO_NUM_22
+#define ALARMA              GPIO_NUM_25
+#define PIN_OUT_AUX01       GPIO_NUM_2
+
+
+#define DURACION_PULSO_MS   700
 
 #define TIME_CONFIRM_END    5000    // 5seg
 

@@ -1,86 +1,92 @@
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
-#include "driver/gpio.h"
-#include "esp_timer.h"
-#include "nvs_flash.h"
-#include "esp_err.h"
 #include "esp_log.h"
-#include "esp_check.h"
+#include "driver/i2c_master.h"
+#include "kincony_board.h" // Asegúrate de que este archivo esté en tu proyecto
 
+#define I2C_SDA 4
+#define I2C_SCL 15
 
-#include <esp_idf_lib_helpers.h>
-#include <button.h>
+static const char *TAG = "KINCONY_MAIN";
+static i2c_master_bus_handle_t bus_handle;
 
-static const char *TAG = "CTRL";
-
-// Definición de pines GPIO 
-#define PIN_SENSOR_SA1              GPIO_NUM_4   // Sensor A1 (más alejado)
-#define PIN_SENSOR_SA2              GPIO_NUM_18   // Sensor A2 (más cerca)
-#define PIN_SENSOR_SB1              GPIO_NUM_19   // Sensor B1 (más cerca)
-#define PIN_SENSOR_SB2              GPIO_NUM_21    // Sensor B2 (más alejado)
-
-
-#define LED_PIN_BLINK GPIO_NUM_2  // Pin del LED integrado en la mayoría de placas ESP32-WROOM
-static button_t btn_sa1, btn_sa2, btn_sb1, btn_sb2;
-
-
-static const char *states[] = {
-    [BUTTON_PRESSED]      = "pressed",
-    [BUTTON_RELEASED]     = "released",
-    [BUTTON_CLICKED]      = "clicked",
-    [BUTTON_PRESSED_LONG] = "pressed long",
-};
-
-
-static void on_button_cb(button_t *btn, button_state_t state) {
-    const char *TAG_BTN = "BTN";
-    if (state != BUTTON_PRESSED_LONG) return;
-
-    ESP_LOGW(TAG_BTN, "[%02d] -> %s", btn->gpio, states[state]);
+// Inicialización del Bus I2C
+void i2c_bus_init(void) {
+    i2c_master_bus_config_t bus_cfg = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = I2C_SDA,
+        .scl_io_num = I2C_SCL,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus_handle));
 }
 
-
-int init_btn_funcs()
-{
-    // First button connected between GPIO and GND
-    // pressed logic level 0, no autorepeat
-    btn_sa1.gpio = PIN_SENSOR_SA1;
-    btn_sa1.pressed_level = 0;
-    btn_sa1.internal_pull = true;
-    btn_sa1.autorepeat = false;
-    btn_sa1.callback = on_button_cb;
-
-    btn_sa2.gpio = PIN_SENSOR_SA2;
-    btn_sa2.pressed_level = 0;
-    btn_sa2.internal_pull = true;
-    btn_sa2.autorepeat = false;
-    btn_sa2.callback = on_button_cb;
-
-    btn_sb1.gpio = PIN_SENSOR_SB1;
-    btn_sb1.pressed_level = 0;
-    btn_sb1.internal_pull = true;
-    btn_sb1.autorepeat = false;
-    btn_sb1.callback = on_button_cb;
-
-    btn_sb2.gpio = PIN_SENSOR_SB2;
-    btn_sb2.pressed_level = 0;
-    btn_sb2.internal_pull = true;
-    btn_sb2.autorepeat = false;
-    btn_sb2.callback = on_button_cb;
-
-    ESP_ERROR_CHECK(button_init(&btn_sa1));
-    ESP_ERROR_CHECK(button_init(&btn_sa2));
-    ESP_ERROR_CHECK(button_init(&btn_sb1));
-    ESP_ERROR_CHECK(button_init(&btn_sb2));
-	return 0;
+// Función de escaneo para verificar hardware
+void i2c_scan(i2c_master_bus_handle_t bus) {
+    ESP_LOGI(TAG, "Escaneando bus I2C...");
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        esp_err_t ret = i2c_master_probe(bus, addr, 100);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Dispositivo encontrado en: 0x%02X", addr);
+        }
+    }
 }
 
-
-
-void app_main() {
-    ESP_LOGI(TAG, "Iniciando sistema de control vehicular y peatonal con interrupciones");
+// void app_main(void) {
+//     // 1. Inicializar Hardware
+//     i2c_bus_init();
     
-    init_btn_funcs();
-    ESP_LOGI(TAG, "Sistema inicializado correctamente - Usando interrupciones GPIO");
+//     // 2. Escaneo rápido (opcional, útil para depurar)
+//     i2c_scan(bus_handle);
+
+//     // 3. Configurar la librería de entradas Kincony
+//     kincony_inputs_t board;
+//     // Usamos 0x24 porque es lo que detectó tu escaneo anterior
+//     esp_err_t ret = kincony_inputs_init(bus_handle, 0x24, &board);
+
+//     if (ret != ESP_OK) {
+//         ESP_LOGE(TAG, "No se pudo inicializar el PCF8574. Revisa conexiones.");
+//         return;
+//     }
+
+//     // 4. Bucle de lectura
+//     while (1) {
+//         uint8_t bits = 0;
+//         ret = kincony_inputs_read(&board, &bits);
+        
+//         if ( ret == ESP_OK) {
+//             // Imprimimos el estado de las 6 entradas del esquema
+//             ESP_LOGI(TAG,"ESTADO DI -> [1]:%d [2]:%d [3]:%d [4]:%d [5]:%d [6]:%d\r",
+//                     (bits >> 0) & 1, (bits >> 1) & 1, (bits >> 2) & 1,
+//                     (bits >> 3) & 1, (bits >> 4) & 1, (bits >> 5) & 1);
+//             fflush(stdout); 
+//         }else
+//         {
+//             ESP_LOGE(TAG,"ret: %d",ret);
+//         }
+        
+//         vTaskDelay(pdMS_TO_TICKS(100)); // 10 lecturas por segundo
+//     }
+// }
+
+
+void app_main(void) {
+    i2c_bus_init(); 
+    i2c_scan(bus_handle);
+    kincony_board_t board;
+    kincony_init(bus_handle, &board);
+
+    while (1) {
+        uint8_t inputs = 0;
+        if (kincony_read_inputs(&board, &inputs) == ESP_OK) {
+            // Ejemplo: El relé 1 sigue el estado de la entrada 1
+            kincony_write_relays(&board, inputs); 
+            
+            ESP_LOGI(TAG,"Entradas activas: 0x%02X", inputs);
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
